@@ -6,15 +6,8 @@ import FilingTable from '@/components/FilingTable';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
-export default function ResultsClient({ params }: { params: Promise<{ ticker: string }> }) {
+export default function ResultsClient({ ticker }: { ticker: string }) {
   const searchParams = useSearchParams();
-  const [ticker, setTicker] = React.useState('');
-  
-  React.useEffect(() => {
-    params.then(p => {
-      setTicker(p.ticker.toUpperCase());
-    });
-  }, [params]);
   
   const cik = searchParams.get('cik');
   const name = searchParams.get('name') || ticker;

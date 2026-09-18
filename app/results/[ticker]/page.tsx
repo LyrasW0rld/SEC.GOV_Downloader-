@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { use } from 'react';
 import { Suspense } from 'react';
 import ResultsClient from './ResultsClient';
 import { ArrowLeft } from 'lucide-react';
@@ -15,24 +15,12 @@ export async function generateStaticParams() {
 }
 
 export default function ResultsPage({ params }: { params: Promise<{ ticker: string }> }) {
-  return (
-    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="text-zinc-50">Loading...</div></div>}>
-      <ResultsClient params={params} />
-    </Suspense>
-  );
-}
-
-export default function ResultsPage({ params }: { params: Promise<{ ticker: string }> }) {
-  return (
-    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="text-zinc-50">Loading...</div></div>}>
-      <ResultsWrapper params={params} />
-    </Suspense>
-  );
-}
-
-function ResultsWrapper({ params }: { params: Promise<{ ticker: string }> }) {
   const resolvedParams = use(params);
   const ticker = resolvedParams.ticker.toUpperCase();
   
-  return <ResultsContent ticker={ticker} />;
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="text-zinc-50">Loading...</div></div>}>
+      <ResultsClient ticker={ticker} />
+    </Suspense>
+  );
 }
