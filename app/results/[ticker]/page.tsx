@@ -21,3 +21,18 @@ export default function ResultsPage({ params }: { params: Promise<{ ticker: stri
     </Suspense>
   );
 }
+
+export default function ResultsPage({ params }: { params: Promise<{ ticker: string }> }) {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="text-zinc-50">Loading...</div></div>}>
+      <ResultsWrapper params={params} />
+    </Suspense>
+  );
+}
+
+function ResultsWrapper({ params }: { params: Promise<{ ticker: string }> }) {
+  const resolvedParams = use(params);
+  const ticker = resolvedParams.ticker.toUpperCase();
+  
+  return <ResultsContent ticker={ticker} />;
+}
