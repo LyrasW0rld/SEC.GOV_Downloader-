@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, Download, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Download } from 'lucide-react';
+import { fetchFilings } from '@/lib/sec-client';
+import { subMonths, isAfter, parseISO } from 'date-fns';
+import JSZip from 'jszip';
 
 interface Filing {
   id: string;
@@ -22,23 +25,56 @@ export default function FilingTable({ ticker, cik }: { ticker: string; cik: stri
   
   // Download state
   const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, status: '' });
-
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0, status: '', error: '' });
+  
   useEffect(() => {
-    const fetchFilings = async () => {
+    const fetchFilingsData = async () => {
       try {
-        const res = await fetch(`/api/filings?cik=${cik}`);
-        if (res.ok) {
-          const data = await res.json();
-          setFilings(data);
+        const data = await fetchFilings(cik);
+        const recentFilings = data.filings?.recent || {};
+        
+        if (!recentFilings.accessionNumber) {
+          setFilings([]);
+          setIsLoading(false);
+          return;
         }
+
+        const fourteenMonthsAgo = subMonths(new Date(), 14);
+        const results: Filing[] = [];
+
+        for (let i = 0; i < recentFilings.accessionNumber.length; i++) {
+          const filingDateStr = recentFilings.filingDate[i];
+          const filingDate = parseISO(filingDateStr);
+
+          if (isAfter(filingDate, fourteenMonthsAgo)) {
+            const accessionNumber = recentFilings.accessionNumber[i];
+            const accessionNumberNoDashes = accessionNumber.replace(/-/g, '');
+            const primaryDocument = recentFilings.primaryDocument[i];
+            
+            // Only include filings that have a primary document
+            if (primaryDocument) {
+              results.push({
+                id: accessionNumber,
+                form: recentFilings.form[i],
+                filingDate: filingDateStr,
+                description: recentFilings.primaryDocDescription[i] || recentFilings.form[i],
+                accessionNumber: accessionNumber,
+                primaryDocument: primaryDocument,
+                size: recentFilings.size[i],
+                downloadUrl: `https://www.sec.gov/Archives/edgar/data/${cik}/${accessionNumberNoDashes}/${primaryDocument}`,
+              });
+            }
+          }
+        }
+
+        setFilings(results);
       } catch (error) {
         console.error('Failed to fetch filings:', error);
       } finally {
         setIsLoading(false);
       }
     };
-    fetchFilings();
+    fetchFilingsData();
   }, [cik]);
 
   const filteredFilings = filings.filter((f) => {
@@ -83,56 +119,74 @@ export default function FilingTable({ ticker, cik }: { ticker: string; cik: stri
     if (selectedFilings.length === 0) return;
 
     setIsDownloading(true);
-    setDownloadProgress({ current: 0, total: selectedFilings.length, status: 'Starting...' });
+    setDownloadProgress({ current: 0, total: selectedFilings.length, status: 'Starting...', error: '' });
 
     try {
-      const res = await fetch('/api/download/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filings: selectedFilings }),
-      });
-      
-      const { jobId, error } = await res.json();
-      if (error) throw new Error(error);
-
-      // Listen to SSE
-      const evtSource = new EventSource(`/api/download/progress?jobId=${jobId}`);
-      
-      evtSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.error) {
-          evtSource.close();
-          setIsDownloading(false);
-          alert(`Download failed: ${data.error}`);
-          return;
+      if (selectedFilings.length === 1) {
+        // Single file - open SEC URL directly in new tab
+        const filing = selectedFilings[0];
+        window.open(filing.downloadUrl, '_blank');
+        setDownloadProgress({ current: 1, total: 1, status: 'Opened filing in new tab', error: '' });
+        setTimeout(() => setIsDownloading(false), 2000);
+      } else {
+        // Multiple files - download HTML files and create ZIP
+        const zip = new JSZip();
+        
+        for (let i = 0; i < selectedFilings.length; i++) {
+          const filing = selectedFilings[i];
+          setDownloadProgress({ 
+            current: i, 
+            total: selectedFilings.length, 
+            status: `Fetching ${filing.form}...`, 
+            error: '' 
+          });
+          
+          try {
+            // Add a small delay to avoid rate limiting
+            if (i > 0) await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const response = await fetch(filing.downloadUrl);
+            if (!response.ok) throw new Error(`Failed to fetch ${filing.form}`);
+            
+            const htmlContent = await response.text();
+            const fileName = `${filing.form}_${filing.filingDate}_${filing.id}.html`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+            zip.file(fileName, htmlContent);
+            
+            setDownloadProgress({ 
+              current: i + 1, 
+              total: selectedFilings.length, 
+              status: `Downloaded ${filing.form}`, 
+              error: '' 
+            });
+          } catch (error: any) {
+            console.error(`Failed to download ${filing.form}:`, error);
+            setDownloadProgress({ 
+              current: i + 1, 
+              total: selectedFilings.length, 
+              status: `Error with ${filing.form}`, 
+              error: error.message 
+            });
+          }
         }
-
-        setDownloadProgress({
-          current: data.current || 0,
-          total: data.total || 0,
-          status: data.currentFile ? `Processing ${data.currentFile}...` : 'Preparing...',
-        });
-
-        if (data.status === 'completed') {
-          evtSource.close();
-          // Trigger download
-          window.location.href = `/api/download/result?jobId=${jobId}`;
-          setTimeout(() => setIsDownloading(false), 2000);
-        } else if (data.status === 'error') {
-          evtSource.close();
-          setIsDownloading(false);
-          alert(`Download failed: ${data.error}`);
-        }
-      };
-      
-      evtSource.onerror = () => {
-        evtSource.close();
-        setIsDownloading(false);
-      };
-    } catch (error) {
-      console.error('Download setup failed:', error);
+        
+        // Generate and download ZIP
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const zipUrl = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = zipUrl;
+        a.download = `sec_filings_${ticker}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(zipUrl);
+        
+        setDownloadProgress({ current: selectedFilings.length, total: selectedFilings.length, status: 'Download complete!', error: '' });
+        setTimeout(() => setIsDownloading(false), 2000);
+      }
+    } catch (error: any) {
+      console.error('Download failed:', error);
+      setDownloadProgress({ current: 0, total: 0, status: '', error: error.message || 'Download failed' });
       setIsDownloading(false);
-      alert('Failed to start download');
     }
   };
 
@@ -252,6 +306,9 @@ export default function FilingTable({ ticker, cik }: { ticker: string; cik: stri
                   style={{ width: `${downloadProgress.total > 0 ? (downloadProgress.current/downloadProgress.total)*100 : 0}%` }}
                 ></div>
               </div>
+              {downloadProgress.error && (
+                <div className="text-[10px] text-red-500 mt-2 uppercase tracking-widest font-bold">{downloadProgress.error}</div>
+              )}
             </>
           ) : (
             <div className="text-[12px] text-zinc-400 uppercase tracking-widest font-bold">

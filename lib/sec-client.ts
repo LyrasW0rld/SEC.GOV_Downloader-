@@ -6,18 +6,19 @@ export interface CompanyTicker {
   title: string;
 }
 
+// Fetch company tickers directly from SEC
 export async function fetchCompanyTickers(): Promise<Record<string, CompanyTicker>> {
   const res = await fetch('https://www.sec.gov/files/company_tickers.json', {
     headers: {
       'User-Agent': SEC_USER_AGENT,
       'Accept-Encoding': 'gzip, deflate',
     },
-    next: { revalidate: 86400 }, // Cache for 24 hours
   });
   if (!res.ok) throw new Error('Failed to fetch company tickers');
   return res.json();
 }
 
+// Fetch filings directly from SEC
 export async function fetchFilings(cik: string) {
   const paddedCik = cik.padStart(10, '0');
   const res = await fetch(`https://data.sec.gov/submissions/CIK${paddedCik}.json`, {
