@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Loader2 } from 'lucide-react';
+import { fetchCompanyTickers } from '@/lib/sec-client';
 
 interface SearchResult {
   ticker: string;
@@ -15,8 +16,31 @@ export default function TickerSearch() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [companyData, setCompanyData] = useState<Record<string, SearchResult> | null>(null);
   const router = useRouter();
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Load company tickers on mount
+  useEffect(() => {
+    const loadCompanyData = async () => {
+      try {
+        const data = await fetchCompanyTickers();
+        const searchResults: Record<string, SearchResult> = {};
+        for (const key in data) {
+          const company = data[key];
+          searchResults[key] = {
+            ticker: company.ticker,
+            name: company.title,
+            cik: company.cik_str.toString(),
+          };
+        }
+        setCompanyData(searchResults);
+      } catch (error) {
+        console.error('Failed to load company data:', error);
+      }
+    };
+    loadCompanyData();
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -29,31 +53,39 @@ export default function TickerSearch() {
   }, []);
 
   useEffect(() => {
-    const fetchResults = async () => {
-      if (!query.trim()) {
+    const searchCompanies = () => {
+      if (!query.trim() || !companyData) {
         setResults([]);
         setIsOpen(false);
         return;
       }
 
       setIsLoading(true);
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setResults(data);
-          setIsOpen(true);
+      const q = query.toLowerCase();
+      const matched: SearchResult[] = [];
+
+      for (const key in companyData) {
+        const company = companyData[key];
+        const ticker = company.ticker.toLowerCase();
+        const name = company.name.toLowerCase();
+
+        if (ticker.includes(q) || name.includes(q)) {
+          matched.push(company);
         }
-      } catch (error) {
-        console.error('Search failed:', error);
-      } finally {
-        setIsLoading(false);
+
+        if (matched.length >= 10) {
+          break;
+        }
       }
+
+      setResults(matched);
+      setIsOpen(true);
+      setIsLoading(false);
     };
 
-    const debounceTimer = setTimeout(fetchResults, 300);
+    const debounceTimer = setTimeout(searchCompanies, 300);
     return () => clearTimeout(debounceTimer);
-  }, [query]);
+  }, [query, companyData]);
 
   const handleSelect = (result: SearchResult) => {
     setQuery('');
