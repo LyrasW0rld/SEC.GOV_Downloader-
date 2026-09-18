@@ -1,20 +1,16 @@
+'use client';
+
+import React, { use } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import FilingTable from '@/components/FilingTable';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 
-export default async function ResultsPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ ticker: string }>;
-  searchParams: Promise<{ cik?: string; name?: string }>;
-}) {
-  const resolvedParams = await params;
-  const resolvedSearchParams = await searchParams;
-  
-  const ticker = resolvedParams.ticker.toUpperCase();
-  const cik = resolvedSearchParams.cik;
-  const name = resolvedSearchParams.name || ticker;
+function ResultsContent({ ticker }: { ticker: string }) {
+  const searchParams = useSearchParams();
+  const cik = searchParams.get('cik');
+  const name = searchParams.get('name') || ticker;
 
   if (!cik) {
     return (
@@ -37,7 +33,7 @@ export default async function ResultsPage({
             </Link>
           </div>
           <h1 className="text-[48px] sm:text-[84px] font-[900] leading-[0.9] tracking-[-0.05em] uppercase w-full max-w-[800px] truncate">
-            {name}
+            {decodeURIComponent(name)}
           </h1>
         </div>
         <div className="flex gap-6 sm:gap-[40px] mb-[10px]">
@@ -59,4 +55,19 @@ export default async function ResultsPage({
       <FilingTable ticker={ticker} cik={cik} />
     </div>
   );
+}
+
+export default function ResultsPage({ params }: { params: Promise<{ ticker: string }> }) {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="text-zinc-50">Loading...</div></div>}>
+      <ResultsWrapper params={params} />
+    </Suspense>
+  );
+}
+
+function ResultsWrapper({ params }: { params: Promise<{ ticker: string }> }) {
+  const resolvedParams = use(params);
+  const ticker = resolvedParams.ticker.toUpperCase();
+  
+  return <ResultsContent ticker={ticker} />;
 }
